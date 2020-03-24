@@ -27,7 +27,3 @@ def setup_notebook():
     plt.rcParams["font.sans-serif"] = ["Liberation Sans"]
     plt.rcParams["font.cursive"] = ["Liberation Sans"]
     plt.rcParams["mathtext.fontset"] = "custom"
-
-    from .. import __version__
-
-    import theano

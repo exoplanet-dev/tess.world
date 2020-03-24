@@ -10,5 +10,6 @@ dependencies:
   - pymc3
   - theano
   - astropy
+  - python-graphviz
   - pip:
     - -r requirements.txt
