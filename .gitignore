@@ -1,0 +1,6 @@
+cache
+*.fits
+*.h5
+*.json
+*.pkl
+*.csv
