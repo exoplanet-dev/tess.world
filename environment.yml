@@ -2,13 +2,13 @@ name: cenv
 channels:
   - defaults
 dependencies:
-  - matplotlib
-  - astropy
-  - python=3.8
-  - scipy
   - numpy
+  - matplotlib
+  - scipy
+  - python=3.8
+  - pip
   - pymc3
   - theano
-  - pip
+  - astropy
   - pip:
     - -r requirements.txt

@@ -1,5 +1,11 @@
+setuptools>=40.6.0
+wheel
+setuptools_scm
 flake8
 black
 corner
 jupyterlab
 lightkurve
+exoplanet>=0.2.6
+nbstripout
+pre-commit
