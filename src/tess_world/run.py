@@ -10,6 +10,7 @@ from functools import partial
 import jupytext
 import nbformat
 import pkg_resources
+import zmq
 from nbconvert.preprocessors import CellExecutionError, ExecutePreprocessor
 
 from .nexsci import get_toi_list
@@ -21,7 +22,7 @@ PATH = (
 )
 
 
-def run_one(toi_num, output_directory="./results"):
+def run_one(toi_num, output_directory="./results", depth=0):
     working_path = pathlib.Path(output_directory).resolve() / __version__
     output_path = working_path / f"{toi_num}"
     output_path.mkdir(parents=True, exist_ok=True)
@@ -59,6 +60,13 @@ def run_one(toi_num, output_directory="./results"):
         print(msg)
         with open(output_path / "error.log", "w") as f:
             f.write(msg)
+    except zmq.error.ZMQError:
+        if depth > 10:
+            raise
+        time.sleep(1)
+        return run_one(
+            toi_num, output_directory=output_directory, depth=depth + 1
+        )
     else:
         total_time = time.time() - strt
         with open(filename, mode="wt") as f:
