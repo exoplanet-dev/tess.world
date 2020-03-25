@@ -3,20 +3,10 @@ setuptools>=40.6.0
 wheel
 setuptools_scm
 
-# Standard scientific stack
-numpy
-matplotlib
-scipy
-pandas
-pymc3
-theano
-astropy
-
 # Tools for light curve analysis/MCMC
 corner
 lightkurve
 exoplanet>=0.2.6
-graphviz
 
 # For executing the notebooks
 jupyterlab
