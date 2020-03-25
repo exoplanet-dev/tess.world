@@ -26,7 +26,7 @@ def run_one(toi_num, output_directory="./results"):
     output_path = working_path / f"{toi_num}"
     output_path.mkdir(parents=True, exist_ok=True)
     filename = output_path / f"toi{toi_num}.ipynb"
-    if filename.exists():
+    if filename.exists() or (output_path / "error.log").exists():
         return
 
     # Load the template and insert the TOI number where it is required
