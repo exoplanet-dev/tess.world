@@ -5,12 +5,16 @@ __all__ = [
     "get_lightkurve_directory",
     "setup_notebook",
     "get_toi_list",
+    "run_one",
+    "run_multiple",
+    "run_all",
 ]
 
 from .directories import get_lightkurve_directory
 from .encoder import NumpyEncoder
 from .models import LightCurveModels
 from .nexsci import get_toi_list
+from .run import run_all, run_multiple, run_one
 from .setup_notebook import setup_notebook
 from .tess_world_version import __version__
 

@@ -5,3 +5,4 @@ cache
 *.pkl
 *.csv
 src/tess_world/tess_world_version.py
+results

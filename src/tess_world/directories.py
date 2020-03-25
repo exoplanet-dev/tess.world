@@ -4,4 +4,4 @@ import os
 
 
 def get_lightkurve_directory():
-    return os.environ.get("LIGHTCURVE_DIRECTORY", "./cache/lightcurve")
+    return os.environ.get("LIGHTKURVE_DIRECTORY", "./cache/lightkurve")
