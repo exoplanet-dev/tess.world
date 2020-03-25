@@ -26,6 +26,8 @@ def run_one(toi_num, output_directory="./results"):
     output_path = working_path / f"{toi_num}"
     output_path.mkdir(parents=True, exist_ok=True)
     filename = output_path / f"toi{toi_num}.ipynb"
+    if filename.exists():
+        return
 
     # Load the template and insert the TOI number where it is required
     with open(PATH, "r") as f:
@@ -61,6 +63,8 @@ def run_one(toi_num, output_directory="./results"):
         total_time = time.time() - strt
         with open(filename, mode="wt") as f:
             nbformat.write(notebook, f)
+    finally:
+        del ep
 
     with open(output_path / "time.txt", "w") as f:
         f.write(f"{total_time} seconds\n")
