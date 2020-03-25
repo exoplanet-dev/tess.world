@@ -50,14 +50,15 @@ def run_one(toi_num, output_directory="./results"):
     try:
         strt = time.time()
         ep.preprocess(notebook, {"metadata": {"path": str(output_path)}})
-        total_time = time.time() - strt
     except CellExecutionError as e:
+        total_time = time.time() - strt
         msg = "error while running: {0}\n\n".format(filename)
         msg += e.traceback
         print(msg)
         with open(output_path / "error.log", "w") as f:
             f.write(msg)
     else:
+        total_time = time.time() - strt
         with open(filename, mode="wt") as f:
             nbformat.write(notebook, f)
 
