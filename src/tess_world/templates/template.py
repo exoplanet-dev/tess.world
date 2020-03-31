@@ -71,10 +71,6 @@ import tess_world
 
 tess_world.setup_notebook()
 
-# %%
-tois = tess_world.get_toi_list()
-len(tois.toipfx.unique())
-
 # %% [markdown]
 # ## Data access and pre-processing
 #
@@ -82,7 +78,7 @@ len(tois.toipfx.unique())
 # These parameters will be used as an initial guess for the fit.
 
 # %%
-toi_num = 514
+toi_num = 1690
 
 tois = tess_world.get_toi_list()
 
@@ -156,6 +152,12 @@ for n in range(num_toi):
         t += period_guess[n]
         label = None
 
+    t = float(t0_guess[n] - period_guess[n])
+    while t > x.min():
+        plt.axvline(t, color=f"C{n}", alpha=0.3, lw=3)
+        t -= period_guess[n]
+        label = None
+
 plt.xlim(x.min(), x.max())
 _ = plt.legend(fontsize=10)
 
@@ -166,7 +168,8 @@ _ = plt.legend(fontsize=10)
 
 # %%
 # Deal with single transits
-single_transit = period_guess <= 0.0
+single_transit = (period_guess <= 0.0) | np.isnan(period_guess)
+multi_transit = ~single_transit
 period_guess[single_transit] = x.max() - x.min()
 period_min = np.maximum(np.abs(t0_guess - x.max()), np.abs(x.min() - t0_guess))
 
@@ -175,15 +178,17 @@ period_min = np.maximum(np.abs(t0_guess - x.max()), np.abs(x.min() - t0_guess))
 # This helps speed up the analysis and will only limit our precision for stars with extremely coherent variability, and then probably only marginally.
 
 # %%
+min_duration = min(duration_guess.min(), 2 * np.min(np.diff(x)))
+max_duration = np.zeros(num_toi)
 transit_mask = np.zeros_like(x, dtype=bool)
 for n in range(num_toi):
-    delta = max(1.5 * duration_guess[n], 0.1)
+    max_duration[n] = max(1.5 * duration_guess[n], 0.1)
     if single_transit[n]:
-        delta = 1.0
+        max_duration[n] = 1.0
     x_fold = (x - t0_guess[n] + 0.5 * period_guess[n]) % period_guess[
         n
     ] - 0.5 * period_guess[n]
-    m = np.abs(x_fold) < delta
+    m = np.abs(x_fold) < max_duration[n]
     transit_mask |= m
 
     plt.figure(figsize=(8, 4))
@@ -195,11 +200,27 @@ for n in range(num_toi):
         f"TOI {toi_num}.{n + 1:02d}, PDC flux, period = {period_guess[n]:.3f} d",
         fontsize=14,
     )
-    plt.xlim(-delta, delta)
+    plt.xlim(-max_duration[n], max_duration[n])
 
 x = np.ascontiguousarray(x[transit_mask])
 y = np.ascontiguousarray(y[transit_mask])
 yerr = np.ascontiguousarray(yerr[transit_mask])
+
+if len(x) < 100:
+    raise RuntimeError("no data")
+
+# %% [markdown]
+# The final bit of reparameterization that we'll do is to compute the time of the *last* transit that is observed in the baseline.
+# Unless we only have a single transit, we fit for this and $t_0$ instead of $t_0$ and period directly because it's easier to constrain the ranges of these parameters.
+# Here we compute the time of the last transit and the number of periods between $t_0$ and "$t_\mathrm{max}$":
+
+# %%
+num_periods = np.zeros(num_toi, dtype=int)
+num_periods[multi_transit] = np.floor(
+    (x.max() - t0_guess[multi_transit]) / period_guess[multi_transit]
+).astype(int)
+t_max_guess = t0_guess + num_periods * period_guess
+print(num_periods, t_max_guess)
 
 
 # %% [markdown]
@@ -214,11 +235,15 @@ yerr = np.ascontiguousarray(yerr[transit_mask])
 # * `sigma`: a jitter parameter that captures excess white noise or underestimated error bars,
 # * `S_tot`: the total power in a [celerite](https://celerite.readthedocs.io) Gaussian process model (a [SHOTerm](https://docs.exoplanet.codes/en/stable/user/api/#exoplanet.gp.terms.SHOTerm) to be precise) for low-frequency variability,
 # * `ell`: the characteristic time scale of the Gaussian Process model,
-# * `period`: the orbital period with either a log-normal or power-law prior (the latter if the TOI is a single transit),
 # * `t0`: the mid-transit time of a reference transit for each planet,
 # * `transit_depth`: the transit depth in parts per thousand, assuming the small-planet approximation,
 # * `transit_duration`: the transit duration in days, and
 # * `b`: the impact parameter of the orbit (note that this is constrained to the range $0 < b < 1$ so this won't deal gracefully with grazing transits).
+#
+# We also fit for either:
+#
+# * `period`: the orbital period with a power-law prior if the TOI is a single transit, or
+# * `t_max`: the time of the last transit observed by TESS, from which we can compute the period.
 #
 # A few key assumptions include:
 #
@@ -239,19 +264,48 @@ def build_model(mask=None):
 
         # Gaussian process noise model
         sigma = pm.InverseGamma("sigma", alpha=3.0, beta=2 * np.median(yerr))
-        S_tot = pm.Lognormal(
-            "S_tot",
-            mu=np.log(np.median((y[mask] - np.median(y[mask])) ** 2)),
-            sigma=5.0,
-        )
-        ell = pm.Lognormal("ell", mu=np.log(1.0), sigma=5.0)
+        S_tot = pm.InverseGamma("S_tot", alpha=3.0, beta=2 * np.median(yerr))
+        ell = pm.Lognormal("ell", mu=0.0, sigma=1.0)
         Q = 1.0 / 3.0
         w0 = 2 * np.pi / ell
         S0 = S_tot / (w0 * Q)
         kernel = xo.gp.terms.SHOTerm(S0=S0, w0=w0, Q=Q)
 
+        # Transit parameters
+        t0 = pm.Bound(
+            pm.Normal,
+            lower=t0_guess - max_duration,
+            upper=t0_guess + max_duration,
+        )(
+            "t0",
+            mu=t0_guess,
+            sigma=0.5 * duration_guess,
+            testval=t0_guess,
+            shape=num_toi,
+        )
+        depth = pm.Lognormal(
+            "transit_depth",
+            mu=np.log(depth_guess),
+            sigma=np.log(1.2),
+            shape=num_toi,
+        )
+        duration = pm.Bound(
+            pm.Lognormal, lower=min_duration, upper=max_duration
+        )(
+            "transit_duration",
+            mu=np.log(duration_guess),
+            sigma=np.log(1.2),
+            shape=num_toi,
+            testval=min(
+                max(duration_guess, 2 * min_duration), 0.99 * max_duration
+            ),
+        )
+        b = xo.distributions.UnitUniform("b", shape=num_toi)
+
         # Dealing with period, treating single transits properly
         period_params = []
+        period_values = []
+        t_max_values = []
         for n in range(num_toi):
             if single_transit[n]:
                 period = pm.Pareto(
@@ -260,25 +314,25 @@ def build_model(mask=None):
                     alpha=2.0 / 3,
                     testval=period_guess[n],
                 )
+                period_params.append(period)
+                t_max_values.append(t0[n])
             else:
-                period = pm.Lognormal(
-                    f"period_{n}", mu=np.log(period_guess[n]), sigma=1.0
+                t_max = pm.Bound(
+                    pm.Normal,
+                    lower=t_max_guess[n] - max_duration[n],
+                    upper=t_max_guess[n] + max_duration[n],
+                )(
+                    f"t_max_{n}",
+                    mu=t_max_guess[n],
+                    sigma=0.5 * duration_guess[n],
+                    testval=t_max_guess[n],
                 )
-            period_params.append(period)
-        period = pm.Deterministic("period", tt.stack(period_params))
-
-        # Transit parameters
-        t0 = pm.Normal("t0", mu=t0_guess, sigma=1.0, shape=num_toi)
-        depth = pm.Lognormal(
-            "transit_depth", mu=np.log(depth_guess), sigma=5.0, shape=num_toi
-        )
-        duration = pm.Lognormal(
-            "transit_duration",
-            mu=np.log(duration_guess),
-            sigma=5.0,
-            shape=num_toi,
-        )
-        b = xo.distributions.UnitUniform("b", shape=num_toi)
+                period = (t_max - t0[n]) / num_periods[n]
+                period_params.append(t_max)
+                t_max_values.append(t_max)
+            period_values.append(period)
+        period = pm.Deterministic("period", tt.stack(period_values))
+        t_max = pm.Deterministic("t_max", tt.stack(t_max_values))
 
         # Compute the radius ratio from the transit depth, impact parameter, and
         # limb darkening parameters making the small-planet assumption
@@ -313,6 +367,21 @@ def build_model(mask=None):
             kernel, x[mask], yerr[mask] ** 2 + sigma ** 2, mean=lc_model
         )
         gp.marginal("obs", observed=y[mask])
+
+        # This is a check on the transit depth constraint
+        D = tt.concatenate(
+            (
+                lc_model.light_curves(x[mask]) / depth[None, :],
+                tt.ones((mask.sum(), 1)),
+            ),
+            axis=-1,
+        )
+        DTD = tt.dot(D.T, gp.apply_inverse(D))
+        DTy = tt.dot(D.T, gp.apply_inverse(y[mask, None]))
+        model.w = tt.slinalg.solve(DTD, DTy)[:, 0]
+        model.sigma_w = tt.sqrt(
+            tt.diag(tt.slinalg.solve(DTD, tt.eye(num_toi + 1)))
+        )
 
         # Double check that everything looks good - we shouldn't see any NaNs!
         print(model.check_test_point())
@@ -402,15 +471,23 @@ for n in range(num_toi):
         f"TOI {toi_num}.{n + 1:02d}, map model, period = {period:.3f} d",
         fontsize=14,
     )
-    delta = max(1.5 * duration_guess[n], 0.1)
-    if single_transit[n]:
-        delta = 1.0
-    plt.xlim(-delta, delta)
+    plt.xlim(-max_duration[n], max_duration[n])
 
 # %% [markdown]
 # In this figure, the colors represent the time at which the datapoint was collected.
 # This can show us if a subset of the transits are systematically off.
 #
+# Now we do a final check to make sure that there's enough signal-to-noise available to get a reasonable fit.
+# Basically, the idea is that if the transit can't be distinguished from the noise, the fit will take a long time and give useless results so we'll just skip those cases.
+
+# %%
+with model:
+    depth_snr = xo.eval_in_model(model.w / model.sigma_w, model.map_soln)
+print(f"depth S/N: {depth_snr[:-1]}")
+if np.any(depth_snr[:-1] < 5):
+    raise RuntimeError("the S/N is too low to get a reasonable fit")
+
+# %% [markdown]
 # ## Inference
 #
 # Now we can get to the good stuff and fit our transit light curve using this probabilistic model and PyMC3's support for Markov chain Monte Carlo (MCMC).
@@ -420,7 +497,7 @@ for n in range(num_toi):
 np.random.seed(toi_num)
 with model:
     trace = pm.sample(
-        tune=2000,
+        tune=3000,
         draws=2000,
         start=model.map_soln,
         chains=2,
@@ -484,16 +561,12 @@ for n in range(num_toi):
     period = np.median(trace["period"][:, n])
     x_fold = (model.x - t0 + 0.5 * period) % period - 0.5 * period
 
-    delta = max(1.5 * duration_guess[n], 0.1)
-    if single_transit[n]:
-        delta = 1.0
-
-    m = np.abs(x_fold) < delta
+    m = np.abs(x_fold) < max_duration[n]
     x0 = 24 * x_fold[m]
     y0 = (model.y - gp_pred - np.median(trace["mean"]))[m]
     axes[n].plot(x0, y0, ".k", label="data", alpha=0.3, mec="none")
 
-    bins = np.linspace(-24 * delta, 24 * delta, 36)
+    bins = np.linspace(-24 * max_duration[n], 24 * max_duration[n], 36)
     num, _ = np.histogram(x0, bins, weights=y0)
     denom, _ = np.histogram(x0, bins)
     axes[n].plot(
@@ -501,7 +574,7 @@ for n in range(num_toi):
     )
 
     axes[n].set_ylabel("de-trended flux [ppt]")
-    axes[n].set_xlim(-24 * delta, 24 * delta)
+    axes[n].set_xlim(-24 * max_duration[n], 24 * max_duration[n])
 
 ylim = [ax.get_ylim() for ax in axes]
 
