@@ -1,0 +1,10 @@
+tess-world.pdf
+*.aux
+*.bbl
+*.blg
+*.log
+*.fls
+*.synctex.gz
+*.fdb_latexmk
+gitlinks.tex
+*.so
